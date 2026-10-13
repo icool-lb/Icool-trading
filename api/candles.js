@@ -3,7 +3,8 @@
 // المفاتيح تُقرأ من متغيّرات بيئة Vercel فقط ولا تصل إلى المتصفح أبداً:
 //   METAAPI_TOKEN + METAAPI_ACCOUNT_ID  (+ اختياري METAAPI_REGION، METAAPI_SUFFIX، METAAPI_SYMBOLS)
 //   TWELVEDATA_API_KEY
-// الترتيب: MetaApi (أسعار وسيطك نفسها) ← Binance (رقمية) ← Twelve Data ← Yahoo (احتياطي بلا مفتاح).
+// OANDA_API_KEY (+ OANDA_ENV=live للحساب الحقيقي، الافتراضي practice)
+// الترتيب: OANDA ← MetaApi (أسعار وسيطك نفسها) ← Binance (رقمية) ← Twelve Data ← Yahoo (احتياطي بلا مفتاح).
 
 'use strict';
 
@@ -43,6 +44,22 @@ function mtSymbol(key) {
   const base = typeof map[key] === 'string' && /^[A-Za-z0-9._#-]{1,32}$/.test(map[key]) ? map[key] : key;
   const suf = /^[A-Za-z0-9._#-]{0,8}$/.test(process.env.METAAPI_SUFFIX || '') ? (process.env.METAAPI_SUFFIX || '') : '';
   return base + suf;
+}
+
+// OANDA v20 — نفس أسعار OANDA:XAUUSD في TradingView. حساب تجريبي مجاني يكفي (OANDA_ENV=practice).
+const OANDA_INS = Object.freeze({ XAUUSD: 'XAU_USD', XAGUSD: 'XAG_USD', EURUSD: 'EUR_USD', GBPUSD: 'GBP_USD', USDJPY: 'USD_JPY',
+  NAS100: 'NAS100_USD', US30: 'US30_USD', SPX500: 'SPX500_USD', NIKKEI: 'JP225_USD', USOIL: 'WTICO_USD' });
+const OANDA_GR = Object.freeze({ '1m': 'M1', '5m': 'M5', '15m': 'M15', '1h': 'H1', '4h': 'H4', '1d': 'D' });
+
+async function fromOanda(sKey, iKey, n, token) {
+  const host = process.env.OANDA_ENV === 'live' ? 'api-fxtrade.oanda.com' : 'api-fxpractice.oanda.com';
+  // الشمعة اليومية تبدأ 17:00 نيويورك كما في TradingView/OANDA
+  const u = `https://${host}/v3/instruments/${OANDA_INS[sKey]}/candles?granularity=${OANDA_GR[iKey]}&count=${n}&price=M` +
+            `&dailyAlignment=17&alignmentTimezone=America%2FNew_York`;
+  const j = await getJSON(u, { Authorization: 'Bearer ' + token, 'Accept-Datetime-Format': 'UNIX', Accept: 'application/json' });
+  if (!j || !Array.isArray(j.candles)) throw new Error('OANDA shape');
+  return clean(j.candles.filter(k => k.mid).map(k => ({ t: Math.floor(+k.time), o: num(k.mid.o), h: num(k.mid.h), l: num(k.mid.l),
+    c: num(k.mid.c), v: num(k.volume) || 0 })));
 }
 
 async function fromMetaApi(sKey, iKey, n, token, account) {
@@ -132,9 +149,11 @@ async function handler(req, res) {
   const n = Math.max(50, Math.min(1000, parseInt(q.n, 10) || 500));
   const key = process.env.TWELVEDATA_API_KEY;
   const mtTok = process.env.METAAPI_TOKEN, mtAcc = process.env.METAAPI_ACCOUNT_ID;
-  const keyed = !!(key || (mtTok && mtAcc));
+  const oaTok = process.env.OANDA_API_KEY;
+  const keyed = !!(key || oaTok || (mtTok && mtAcc));
 
   const chain = [];
+  if (oaTok && OANDA_INS[sKey]) chain.push(['oanda', () => fromOanda(sKey, iKey, n, oaTok)]);
   if (mtTok && mtAcc) chain.push(['metaapi', () => fromMetaApi(sKey, iKey, n, mtTok, mtAcc)]);
   if (sym.bn) chain.push(['binance', () => fromBinance(sym, iv, n)]);
   if (key) chain.push(['twelvedata', () => fromTwelve(sym, iv, n, key)]);
@@ -161,3 +180,4 @@ module.exports.SYMBOLS = SYMBOLS;
 module.exports.INTERVALS = INTERVALS;
 module.exports.aggregate = aggregate;
 module.exports.mtSymbol = mtSymbol;
+module.exports.OANDA_INS = OANDA_INS;

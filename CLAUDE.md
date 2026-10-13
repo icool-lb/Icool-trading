@@ -18,3 +18,5 @@
   لـ TradingView والاستخراج غير الرسمي يخالف شروطها — التحليل يبقى على `/api/candles`. `tvSymbol()` يختار الرمز
   المطابق للمصدر: Yahoo يعطي عقوداً آجلة (GC=F) ⇐ `COMEX:GC1!`، وMetaApi/Twelve Data سعر فوري ⇐ `OANDA:XAUUSD`.
   لا تعرض رمزاً فورياً فوق تحليل مبني على الآجل: الفارق في الذهب عشرات الدولارات فتبدو المستويات خاطئة.
+- **OANDA** أول مصدر عند وجود `OANDA_API_KEY` (`OANDA_ENV=live` للحقيقي، وإلا practice). أسعار `mid`، والشمعة
+  اليومية `dailyAlignment=17` نيويورك كما في TradingView. مع مصدر OANDA يعرض زرّ TradingView رموز `OANDA:*` (العمود الثالث في `TVS`).

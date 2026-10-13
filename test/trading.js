@@ -36,6 +36,22 @@ function mkRes() { const r = { h: {}, statusCode: 0, body: '' }; r.setHeader = (
   ok(ag.length === 2 && ag[0].h === 3 && ag[0].c === 2, 'تجميع 60m ⇐ 4h');
   delete process.env.TWELVEDATA_API_KEY;
 
+  // OANDA: أولاً، Bearer، practice افتراضياً، XAU_USD/M15 بأسعار mid والشموع غير المكتملة مقبولة
+  process.env.OANDA_API_KEY = 'OASECRET'; calls.length = 0; let oaH = null; const pf0 = global.fetch;
+  global.fetch = async (u, o) => { calls.push(u); if (/oanda\.com/.test(u)) { oaH = o.headers;
+      const c = []; for (let i = 0; i < 80; i++) c.push({ complete: i < 79, volume: 5, time: (1758000000 + i * 900) + '.000000000', mid: { o: '2650.1', h: '2651', l: '2649.5', c: '2650.6' } });
+      return { ok: true, json: async () => ({ instrument: 'XAU_USD', granularity: 'M15', candles: c }) }; } return pf0(u, o); };
+  r = mkRes(); await handler({ method: 'GET', query: { s: 'XAUUSD', i: '15m' } }, r); j = JSON.parse(r.body);
+  ok(j.source === 'oanda' && /api-fxpractice\.oanda\.com\/v3\/instruments\/XAU_USD\/candles\?granularity=M15/.test(calls[0]), 'OANDA أولاً: XAU_USD M15 على practice', j.source);
+  ok(oaH.Authorization === 'Bearer OASECRET' && oaH['Accept-Datetime-Format'] === 'UNIX', 'رأس Bearer وتوقيت UNIX');
+  ok(j.candles.length === 80 && j.candles[0].t === 1758000000 && j.candles[0].c === 2650.6, 'تحويل شموع OANDA');
+  ok(!r.body.includes('OASECRET'), 'مفتاح OANDA لا يظهر');
+  process.env.OANDA_ENV = 'live'; calls.length = 0; r = mkRes(); await handler({ method: 'GET', query: { s: 'XAUUSD', i: '1h' } }, r);
+  ok(/api-fxtrade\.oanda\.com/.test(calls[0]) && /granularity=H1/.test(calls[0]), 'OANDA_ENV=live ⇐ الحساب الحقيقي');
+  calls.length = 0; r = mkRes(); await handler({ method: 'GET', query: { s: 'BTCUSD', i: '1h' } }, r);
+  ok(!calls.some(u => /oanda/.test(u)), 'رمز غير متاح في OANDA ⇐ لا طلب OANDA');
+  global.fetch = pf0; delete process.env.OANDA_API_KEY; delete process.env.OANDA_ENV;
+
   // MetaApi: أولاً، رأس auth-token، ترتيب تصاعدي، والرمز مع لاحقة الوسيط
   process.env.METAAPI_TOKEN = 'MTSECRET'; process.env.METAAPI_ACCOUNT_ID = 'acc-1'; process.env.METAAPI_SUFFIX = '.m';
   process.env.METAAPI_SYMBOLS = '{"NAS100":"USTEC"}'; calls.length = 0; let hdr = null;
@@ -117,9 +133,10 @@ function mkRes() { const r = { h: {}, statusCode: 0, body: '' }; r.setHeader = (
 
   // TradingView: الرمز يطابق مصدر البيانات، والأداة تُحمَّل عند الطلب فقط
   const tvm = await pg.evaluate(() => { const r = {}; ST.src = 'yahoo'; ST.sym = 'XAUUSD'; r.fut = TE.tvSymbol();
-    ST.src = 'metaapi'; r.spot = TE.tvSymbol(); ST.sym = 'EURUSD'; ST.src = 'yahoo'; r.fx = TE.tvSymbol();
+    ST.src = 'metaapi'; r.spot = TE.tvSymbol(); ST.src = 'oanda'; ST.sym = 'NAS100'; r.oa = TE.tvSymbol(); ST.sym = 'XAUUSD'; r.oaX = TE.tvSymbol(); ST.sym = 'EURUSD'; ST.src = 'yahoo'; r.fx = TE.tvSymbol();
     r.allMapped = Object.keys(SYMS).every(k => TE.TVS[k]); r.loaded = !!document.querySelector('script[src*="tradingview"]'); return r; });
   ok(tvm.fut === 'COMEX:GC1!' && tvm.spot === 'OANDA:XAUUSD' && tvm.fx === 'FX:EURUSD', 'رمز TradingView يطابق المصدر (آجل/فوري)', tvm.fut + ' / ' + tvm.spot);
+  ok(tvm.oa === 'OANDA:NAS100USD' && tvm.oaX === 'OANDA:XAUUSD', 'مصدر OANDA ⇐ رموز OANDA في TradingView', tvm.oa);
   ok(tvm.allMapped, 'كل الأدوات لها رمز TradingView');
   ok(!tvm.loaded, 'tv.js لا يُحمَّل قبل الطلب');
   let tvArgs = null;

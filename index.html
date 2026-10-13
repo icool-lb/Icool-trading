@@ -578,11 +578,14 @@ function risk(){const eq=+$('eq').value,rk=Math.min(1,+$('rk').value)/100,en=+$(
 // الرسم الرسمي من TradingView (أداة التضمين المجانية). لا توجد واجهة بيانات عامة لـ TradingView،
 // لذا يبقى التحليل على /api/candles، ونختار رمز TradingView المطابق لمصدر البيانات حتى تتطابق الأسعار:
 // Yahoo يعطي العقود الآجلة (GC=F ...) ⇐ نعرض العقد نفسه، وغيره (MetaApi/Twelve Data) سعر فوري.
-const TVS={XAUUSD:['OANDA:XAUUSD','COMEX:GC1!'],XAGUSD:['OANDA:XAGUSD','COMEX:SI1!'],EURUSD:['FX:EURUSD'],GBPUSD:['FX:GBPUSD'],USDJPY:['FX:USDJPY'],
-  NAS100:['CAPITALCOM:US100','CME_MINI:NQ1!'],US30:['CAPITALCOM:US30','CBOT_MINI:YM1!'],SPX500:['CAPITALCOM:US500','CME_MINI:ES1!'],NIKKEI:['TVC:NI225'],
-  USOIL:['TVC:USOIL','NYMEX:CL1!'],BTCUSD:['BINANCE:BTCUSDT'],ETHUSD:['BINANCE:ETHUSDT']};
+const TVS={ // [فوري افتراضي، آجل مع Yahoo، رمز OANDA مع مصدر OANDA]
+  XAUUSD:['OANDA:XAUUSD','COMEX:GC1!','OANDA:XAUUSD'],XAGUSD:['OANDA:XAGUSD','COMEX:SI1!','OANDA:XAGUSD'],
+  EURUSD:['FX:EURUSD',null,'OANDA:EURUSD'],GBPUSD:['FX:GBPUSD',null,'OANDA:GBPUSD'],USDJPY:['FX:USDJPY',null,'OANDA:USDJPY'],
+  NAS100:['CAPITALCOM:US100','CME_MINI:NQ1!','OANDA:NAS100USD'],US30:['CAPITALCOM:US30','CBOT_MINI:YM1!','OANDA:US30USD'],
+  SPX500:['CAPITALCOM:US500','CME_MINI:ES1!','OANDA:SPX500USD'],NIKKEI:['TVC:NI225',null,'OANDA:JP225USD'],
+  USOIL:['TVC:USOIL','NYMEX:CL1!','OANDA:WTICOUSD'],BTCUSD:['BINANCE:BTCUSDT'],ETHUSD:['BINANCE:ETHUSDT']};
 const TVI={'5m':'5','15m':'15','1h':'60','4h':'240','1d':'D'};
-function tvSymbol(){const m=TVS[ST.sym]||[ST.sym];return (/yahoo|تجريبية/.test(ST.src||'')&&m[1])?m[1]:m[0];}
+function tvSymbol(){const m=TVS[ST.sym]||[ST.sym],src=ST.src||'';return (/oanda/.test(src)&&m[2])?m[2]:(/yahoo|تجريبية/.test(src)&&m[1])?m[1]:m[0];}
 let tvLib=null,tvKey='';
 function tvLoad(){return tvLib||(tvLib=new Promise((ok,no)=>{const sc=document.createElement('script');sc.src='https://s3.tradingview.com/tv.js';sc.onload=ok;sc.onerror=()=>{tvLib=null;no();};document.head.appendChild(sc);}));}
 async function tvShow(){

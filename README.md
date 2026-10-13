@@ -9,11 +9,13 @@
 
 ## البيانات
 `/api/candles?s=XAUUSD&i=15m` — دالة Vercel بلا اعتماديات. الترتيب:
-MetaApi (أسعار وسيطك) ⇐ Binance (رقمية) ⇐ Twelve Data ⇐ Yahoo ⇐ بيانات تجريبية معلنة.
+OANDA (نفس OANDA:XAUUSD في TradingView) ⇐ MetaApi (أسعار وسيطك) ⇐ Binance (رقمية) ⇐ Twelve Data ⇐ Yahoo ⇐ بيانات تجريبية معلنة.
 
 متغيّرات البيئة في Vercel (لا تُكتب في الكود أبداً):
 | المتغيّر | الوصف |
 |---|---|
+| `OANDA_API_KEY` | توكن OANDA v20 (حساب تجريبي مجاني يكفي) |
+| `OANDA_ENV` | اختياري: `live` للحساب الحقيقي، الافتراضي `practice` |
 | `METAAPI_TOKEN` | توكن MetaApi |
 | `METAAPI_ACCOUNT_ID` | رقم حساب MetaTrader في MetaApi |
 | `METAAPI_REGION` | اختياري، الافتراضي `new-york` |
