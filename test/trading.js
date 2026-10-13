@@ -115,6 +115,25 @@ function mkRes() { const r = { h: {}, statusCode: 0, body: '' }; r.setHeader = (
   ok(t.lastClosed, 'التحليل على آخر شمعة مغلقة لا الجارية');
   ok(t.pine, 'كود Pine v5 يُولَّد');
 
+  // TradingView: الرمز يطابق مصدر البيانات، والأداة تُحمَّل عند الطلب فقط
+  const tvm = await pg.evaluate(() => { const r = {}; ST.src = 'yahoo'; ST.sym = 'XAUUSD'; r.fut = TE.tvSymbol();
+    ST.src = 'metaapi'; r.spot = TE.tvSymbol(); ST.sym = 'EURUSD'; ST.src = 'yahoo'; r.fx = TE.tvSymbol();
+    r.allMapped = Object.keys(SYMS).every(k => TE.TVS[k]); r.loaded = !!document.querySelector('script[src*="tradingview"]'); return r; });
+  ok(tvm.fut === 'COMEX:GC1!' && tvm.spot === 'OANDA:XAUUSD' && tvm.fx === 'FX:EURUSD', 'رمز TradingView يطابق المصدر (آجل/فوري)', tvm.fut + ' / ' + tvm.spot);
+  ok(tvm.allMapped, 'كل الأدوات لها رمز TradingView');
+  ok(!tvm.loaded, 'tv.js لا يُحمَّل قبل الطلب');
+  let tvArgs = null;
+  await pg.route('**/s3.tradingview.com/tv.js', r => r.fulfill({ status: 200, contentType: 'application/javascript',
+    body: 'window.TradingView={widget:function(o){window.__tv=o;document.getElementById(o.container_id).innerHTML="<iframe></iframe>";}};' }));
+  await pg.evaluate(() => { ST.src = 'yahoo'; }); await pg.selectOption('#sym', 'XAUUSD'); await pg.waitForTimeout(300);
+  await pg.click('#vTV'); await pg.waitForFunction(() => window.__tv, null, { timeout: 5000 });
+  tvArgs = await pg.evaluate(() => ({ s: window.__tv.symbol, i: window.__tv.interval, vis: getComputedStyle(document.getElementById('tvBox')).display, href: document.getElementById('tvOpen').href }));
+  ok(tvArgs.vis === 'block' && tvArgs.i === '15' && /tradingview\.com\/chart/.test(tvArgs.href), 'زرّ TradingView يعرض الرسم الرسمي بنفس الإطار', tvArgs.s + ' ' + tvArgs.i);
+  await pg.selectOption('#tf', '1h'); await pg.waitForFunction(() => window.__tv.interval === '60', null, { timeout: 5000 });
+  ok(true, 'تغيير الإطار يحدّث رسم TradingView');
+  await pg.click('#vIcool'); ok(await pg.evaluate(() => getComputedStyle(document.getElementById('tvBox')).display === 'none'), 'العودة إلى رسم iCOOL');
+  await pg.selectOption('#tf', '15m'); await pg.waitForTimeout(300);
+
   // اختيار إشارة يملأ حاسبة الحجم
   const hasSig = await pg.$('.sig');
   if (hasSig) { await hasSig.click(); const out = await pg.textContent('#riskOut'); ok(/لوت/.test(out), 'اختيار إشارة يملأ حاسبة الحجم'); }

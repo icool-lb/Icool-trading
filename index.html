@@ -36,6 +36,8 @@ main{display:grid;grid-template-columns:290px 1fr 320px;gap:10px;padding:10px}
 label{font-size:12px;color:var(--muted);display:block;margin-bottom:2px}
 #chartWrap{position:relative;direction:ltr;background:var(--panel);border:1px solid var(--line);border-radius:12px;height:64vh;min-height:380px;overflow:hidden;touch-action:none}
 #chart{position:absolute;inset:0;width:100%;height:100%}
+#tvBox{position:absolute;inset:0;display:none;background:var(--panel)}
+.seg{display:flex;gap:0}.seg button{border-radius:0;flex:1}.seg button:first-child{border-radius:0 8px 8px 0}.seg button:last-child{border-radius:8px 0 0 8px}.seg button.on{background:var(--blue);border-color:var(--blue)}
 #tip{position:absolute;top:8px;left:8px;font-size:12px;color:var(--muted);pointer-events:none;background:#0B1220cc;padding:4px 8px;border-radius:6px}
 #status{position:absolute;top:8px;right:80px;font-size:11px;color:var(--muted)}
 .bias{display:flex;align-items:center;gap:10px;font-size:22px;font-weight:800}
@@ -119,7 +121,8 @@ details summary{cursor:pointer;color:var(--muted)}
 
   <!-- الوسط: الرسم -->
   <section class="col" id="colC">
-    <div id="chartWrap"><canvas id="chart"></canvas><div id="tip"></div><div id="status"></div></div>
+    <div class="row" style="flex:0"><div class="seg" style="flex:0 0 auto"><button id="vIcool" class="on">رسم iCOOL بالتحليل</button><button id="vTV">TradingView</button></div><a id="tvOpen" target="_blank" rel="noopener" class="mu" style="flex:0 0 auto;font-size:12px">فتح في TradingView ↗</a><span id="tvSym" class="mu ltr" style="font-size:12px"></span></div>
+    <div id="chartWrap"><canvas id="chart"></canvas><div id="tvBox"><div id="tvw" style="height:100%"></div></div><div id="tip"></div><div id="status"></div></div>
     <div class="card">
       <h3>الدعوم والمقاومات <span class="mu" style="font-size:11px">ق=قوية · م=متوسطة · ض=ضعيفة</span></h3>
       <table id="lvlTbl"></table>
@@ -562,7 +565,7 @@ function panels(){
     <div class="bar"><i style="width:${s.score}%;background:${s.ok?'#4ADE80':'#8A9BB5'}"></i></div></div>`).join(''):'<div class="mu">لا إشارات في آخر 150 شمعة.</div>';
   document.querySelectorAll('.sig').forEach(el=>el.onclick=()=>{const s=sg[+el.dataset.j];ST.selSig=s;$('en').value=dp(s.en);$('sl').value=dp(s.sl);$('tp').value=dp(s.tp);
     const i=s.i;if(i<ST._geo.s0)ST.view.end=Math.min(ST.c.length,i+60);risk();panels();draw();});
-  $('status').textContent='المصدر: '+ST.src+(ST.keyed===false&&!/binance/.test(ST.src)?' · بلا مفتاح':'')+' · '+c.length+' شمعة · ATR '+dp(R.at);
+  $('status').textContent='المصدر: '+ST.src+(/yahoo/.test(ST.src)&&(TVS[ST.sym]||[])[1]?' (عقد آجل '+TVS[ST.sym][1]+')':'')+(ST.keyed===false&&!/binance/.test(ST.src)?' · بلا مفتاح':'')+' · '+c.length+' شمعة · ATR '+dp(R.at);
 }
 function gotobi(){if(ST.sym!=='USDJPY')return '';const p=tzp(Date.now()/1000,'Asia/Tokyo');return [5,10,15,20,25,30].includes(p.d)?'<br>اليوم يوم <b>Gotobi</b> — ضغط شراء محتمل على الدولار/ين حتى تثبيت 9:55 طوكيو.':'';}
 function risk(){const eq=+$('eq').value,rk=Math.min(1,+$('rk').value)/100,en=+$('en').value,sl=+$('sl').value,tp=+$('tp').value,vpu=+$('vpu').value;
@@ -571,12 +574,35 @@ function risk(){const eq=+$('eq').value,rk=Math.min(1,+$('rk').value)/100,en=+$(
   $('riskOut').innerHTML=`مبلغ المخاطرة: ${N('$'+usd.toFixed(2))}<br>الحجم: <b>${N(lots.toFixed(2))}</b> لوت${lots<0.01?' <span class="dn">— أقل من الحد الأدنى: لا صفقة</span>':''}<br>`+
     (rr?`R:R ${N(rr.toFixed(2))} ${rr<1.5?'<span class="dn">— أقل من 1.5: لا صفقة</span>':'<span class="ok">✓</span>'}`:'')+'<br><span class="mu" style="font-size:11px">حدّ خسارة يومي 3% · توقّف بعد 3 خسائر متتالية.</span>';}
 
+/* ================= TradingView ================= */
+// الرسم الرسمي من TradingView (أداة التضمين المجانية). لا توجد واجهة بيانات عامة لـ TradingView،
+// لذا يبقى التحليل على /api/candles، ونختار رمز TradingView المطابق لمصدر البيانات حتى تتطابق الأسعار:
+// Yahoo يعطي العقود الآجلة (GC=F ...) ⇐ نعرض العقد نفسه، وغيره (MetaApi/Twelve Data) سعر فوري.
+const TVS={XAUUSD:['OANDA:XAUUSD','COMEX:GC1!'],XAGUSD:['OANDA:XAGUSD','COMEX:SI1!'],EURUSD:['FX:EURUSD'],GBPUSD:['FX:GBPUSD'],USDJPY:['FX:USDJPY'],
+  NAS100:['CAPITALCOM:US100','CME_MINI:NQ1!'],US30:['CAPITALCOM:US30','CBOT_MINI:YM1!'],SPX500:['CAPITALCOM:US500','CME_MINI:ES1!'],NIKKEI:['TVC:NI225'],
+  USOIL:['TVC:USOIL','NYMEX:CL1!'],BTCUSD:['BINANCE:BTCUSDT'],ETHUSD:['BINANCE:ETHUSDT']};
+const TVI={'5m':'5','15m':'15','1h':'60','4h':'240','1d':'D'};
+function tvSymbol(){const m=TVS[ST.sym]||[ST.sym];return (/yahoo|تجريبية/.test(ST.src||'')&&m[1])?m[1]:m[0];}
+let tvLib=null,tvKey='';
+function tvLoad(){return tvLib||(tvLib=new Promise((ok,no)=>{const sc=document.createElement('script');sc.src='https://s3.tradingview.com/tv.js';sc.onload=ok;sc.onerror=()=>{tvLib=null;no();};document.head.appendChild(sc);}));}
+async function tvShow(){
+  const sym=tvSymbol(),key=sym+'|'+ST.tf;
+  $('tvSym').textContent=sym;$('tvOpen').href='https://www.tradingview.com/chart/?symbol='+encodeURIComponent(sym);
+  if(!ST.tv||key===tvKey)return;tvKey=key;
+  try{await tvLoad();$('tvw').innerHTML='';
+    new TradingView.widget({container_id:'tvw',autosize:true,symbol:sym,interval:TVI[ST.tf]||'15',timezone:'Etc/UTC',theme:'dark',style:'1',
+      locale:'ar_AE',toolbar_bg:'#131C2E',hide_side_toolbar:false,allow_symbol_change:true,withdateranges:true});}
+  catch(_){tvKey='';$('tvw').innerHTML='<div class="mu" style="padding:20px;direction:rtl">تعذّر تحميل TradingView — تحقّق من الاتصال.</div>';}}
+function setView(tv){ST.tv=tv;$('vTV').classList.toggle('on',tv);$('vIcool').classList.toggle('on',!tv);
+  $('tvBox').style.display=tv?'block':'none';['tip','status'].forEach(id=>$(id).style.display=tv?'none':'');
+  try{localStorage.setItem('icool_tv',tv?'1':'0');}catch(_){}if(tv)tvShow();else resize();}
+
 /* ================= الدورة ================= */
 async function load(){
   ST.sym=$('sym').value;ST.tf=$('tf').value;ST.anchor=$('anchor').value;$('status').textContent='جارٍ التحميل…';
   const d=await loadCandles(ST.sym,ST.tf);ST.c=d.c;ST.src=d.src;ST.keyed=d.keyed;
   ST.R=analyze(ST.c,ST.tf,ST.anchor,ST.sym);ST.selSig=null;$('vpu').value=SYMS[ST.sym][1];
-  panels();risk();draw();}
+  panels();risk();draw();tvShow();}
 function tick(){const t=Date.now()/1000;$('clk').textContent=fmtT(t,'UTC')+' UTC';
   const on={asia:0,london:0,ny:0};SESS.forEach(S=>{const p=tzp(t,S.tz);on[S.k]=p.wd!=='Sat'&&p.wd!=='Sun'&&p.min>=S.a&&p.min<S.b;});
   $('cAsia').classList.toggle('on',on.asia);$('cLon').classList.toggle('on',on.london);$('cNY').classList.toggle('on',on.ny);}
@@ -587,6 +613,8 @@ function init(){
   ['shSess','shZones','shIchi'].forEach(id=>$(id).onchange=draw);
   ['eq','rk','en','sl','tp','vpu'].forEach(id=>$(id).oninput=risk);
   $('btnLoad').onclick=load;
+  $('vIcool').onclick=()=>setView(false);$('vTV').onclick=()=>setView(true);
+  try{if(localStorage.getItem('icool_tv')==='1')setView(true);}catch(_){}
   $('pine').value=pineCode();
   $('btnPine').onclick=async()=>{try{await navigator.clipboard.writeText(pineCode());$('btnPine').textContent='✓ نُسخ';}catch(_){$('pine').parentElement.open=true;$('pine').select();}setTimeout(()=>$('btnPine').textContent='نسخ الكود',1500);};
   document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
@@ -594,7 +622,7 @@ function init(){
   new ResizeObserver(resize).observe($('chartWrap'));
   setInterval(tick,1000);tick();setInterval(()=>{if($('auto').checked&&!document.hidden)load();},60000);
   load();}
-window.TE={tzp,atr,dayGroups,sessions,pivots,zones,closeEvent,analyze,demoCandles,scoreSig,pineCode};
+window.TE={tvSymbol,TVS,tzp,atr,dayGroups,sessions,pivots,zones,closeEvent,analyze,demoCandles,scoreSig,pineCode};
 init();
 </script>
 </body>
