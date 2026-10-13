@@ -71,6 +71,24 @@ function mkRes() { const r = { h: {}, statusCode: 0, body: '' }; r.setHeader = (
   ok(j.source === 'yahoo' && calls[0].includes('agiliumtrade'), 'فشل MetaApi ⇐ احتياط', j.source);
   ['METAAPI_TOKEN', 'METAAPI_ACCOUNT_ID', 'METAAPI_SUFFIX', 'METAAPI_SYMBOLS'].forEach(k => delete process.env[k]);
 
+  // مفاتيح المستخدم من لوحة الإعدادات (رؤوس) — تتقدّم على البيئة، ولا تُخزَّن في CDN
+  process.env.OANDA_API_KEY = 'OA';
+  calls.length = 0; hdr = null;
+  global.fetch = async (u, o) => { calls.push(u); if (/agiliumtrade/.test(u)) { hdr = o.headers['auth-token'];
+      const a = []; for (let i = 0; i < 60; i++) a.push({ time: new Date((1758000000 + i * 900) * 1000).toISOString(), open: 1, high: 2, low: 0.5, close: 1.5 });
+      return { ok: true, json: async () => a }; } return prevFetch(u, o); };
+  const UH = { 'x-metaapi-token': 'eyJ' + 'a'.repeat(40), 'x-metaapi-account': '1234abcd-12ab-34cd-56ef-1234567890ab', 'x-metaapi-region': 'london', 'x-metaapi-symbols': '{"XAUUSD":"GOLD"}', 'x-metaapi-suffix': '.m' };
+  r = mkRes(); await handler({ method: 'GET', query: { s: 'XAUUSD', i: '15m', u: '1' }, headers: UH }, r); j = JSON.parse(r.body);
+  ok(j.source === 'metaapi' && j.user === true && hdr === UH['x-metaapi-token'], 'مفتاح اللوحة يُستعمل ويتقدّم على OANDA', j.source);
+  ok(/london\.agiliumtrade\.ai/.test(calls[0]) && /symbols\/GOLD\.m\//.test(calls[0]), 'منطقة واسم الذهب ولاحقته من اللوحة', calls[0].split('symbols/')[1].split('/')[0]);
+  ok(r.h['cache-control'] === 'private, no-store', 'استجابة بمفتاح مستخدم لا تُخزَّن في CDN');
+  ok(!r.body.includes(UH['x-metaapi-token']) && !r.body.includes('1234abcd'), 'التوكن والحساب لا يعودان في الاستجابة');
+  r = mkRes(); await handler({ method: 'GET', query: { s: 'XAUUSD', i: '15m' }, headers: { 'x-metaapi-token': 'bad token\r\nX: y', 'x-metaapi-account': 'acc' } }, r);
+  ok(r.statusCode === 400 && /BAD_KEY/.test(r.body), 'توكن بصيغة خاطئة ⇐ 400 بلا أي طلب خارجي');
+  r = mkRes(); await handler({ method: 'GET', query: { s: 'XAUUSD', i: '15m', u: '1' }, headers: Object.assign({}, UH, { 'x-metaapi-region': 'evil.com/x' }) }, r);
+  ok(/new-york\.agiliumtrade\.ai/.test(calls[calls.length - 1]), 'منطقة غير صالحة ⇐ new-york (لا SSRF)');
+  global.fetch = prevFetch; delete process.env.OANDA_API_KEY;
+
   console.log('\n[2] الصفحة والمحرّك');
   const srv = http.createServer((q, s) => {
     if (q.url.startsWith('/api/')) { s.writeHead(502, { 'content-type': 'application/json' }); return s.end('{"ok":false,"error":{"code":"UPSTREAM_FAIL"}}'); }
@@ -150,6 +168,25 @@ function mkRes() { const r = { h: {}, statusCode: 0, body: '' }; r.setHeader = (
   ok(true, 'تغيير الإطار يحدّث رسم TradingView');
   await pg.click('#vIcool'); ok(await pg.evaluate(() => getComputedStyle(document.getElementById('tvBox')).display === 'none'), 'العودة إلى رسم iCOOL');
   await pg.selectOption('#tf', '15m'); await pg.waitForTimeout(300);
+
+  // لوحة ربط MetaApi: الحفظ على الجهاز، الإرسال كرؤوس مع u=1، وعرض الحالة
+  let seen = null;
+  await pg.route('**/api/candles**', async rt => { const q = rt.request(); const h = q.headers();
+    if (h['x-metaapi-token']) { seen = { url: q.url(), h };
+      const c = []; for (let i = 0; i < 200; i++) { const p = 2650 + Math.sin(i / 5) * 8; c.push({ t: Math.floor(Date.now() / 1000 / 900) * 900 - (199 - i) * 900, o: p, h: p + 2, l: p - 2, c: p + .5, v: 9 }); }
+      return rt.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, source: 'metaapi', keyed: true, user: true, tried: [], candles: c }) }); }
+    return rt.fulfill({ status: 502, contentType: 'application/json', body: '{"ok":false,"error":{"code":"UPSTREAM_FAIL","tried":[]}}' }); });
+  await pg.click('#mtCard summary');
+  await pg.fill('#mtTok', 'eyJ' + 'b'.repeat(40)); await pg.fill('#mtAcc', 'abcd1234-0000-1111-2222-333344445555'); await pg.fill('#mtGold', 'GOLD');
+  await pg.click('#mtSave'); await pg.waitForFunction(() => /متّصل/.test(document.getElementById('mtMsg').textContent), null, { timeout: 8000 });
+  ok(/[?&]u=1/.test(seen.url) && seen.h['x-metaapi-account'] === 'abcd1234-0000-1111-2222-333344445555' && seen.h['x-metaapi-symbols'] === '{"XAUUSD":"GOLD"}', 'اللوحة ترسل المفاتيح كرؤوس مع u=1');
+  await pg.waitForFunction(() => /المصدر: metaapi/.test(document.getElementById('status').textContent), null, { timeout: 8000 });
+  ok(await pg.evaluate(() => /مربوط/.test(document.getElementById('mtState').textContent) && !!localStorage.getItem('icool_mt')), 'الحالة «مربوط» والتحليل من metaapi');
+  await pg.reload(); await pg.waitForFunction(() => /المصدر: metaapi/.test(document.getElementById('status').textContent), null, { timeout: 10000 });
+  ok(true, 'الربط يبقى بعد إعادة تحميل الصفحة');
+  await pg.click('#mtCard summary'); await pg.click('#mtDel'); await pg.waitForTimeout(400);
+  ok(await pg.evaluate(() => !localStorage.getItem('icool_mt') && /غير مربوط/.test(document.getElementById('mtState').textContent)), 'حذف الربط يمسحه من الجهاز');
+  await pg.unroute('**/api/candles**');
 
   // اختيار إشارة يملأ حاسبة الحجم
   const hasSig = await pg.$('.sig');

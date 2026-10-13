@@ -105,6 +105,22 @@ details summary{cursor:pointer;color:var(--muted)}
       </div>
     </div>
 
+    <details class="card" id="mtCard">
+      <summary style="display:flex;justify-content:space-between;align-items:center"><b>ربط MetaApi</b> <span id="mtState" class="mu" style="font-size:12px">غير مربوط</span></summary>
+      <div style="margin-top:8px">
+        <label>Token</label><input id="mtTok" type="password" autocomplete="off" spellcheck="false" class="ltr" style="width:100%">
+        <label style="margin-top:6px">Account ID</label><input id="mtAcc" autocomplete="off" spellcheck="false" class="ltr" style="width:100%" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+        <div class="row" style="margin-top:6px">
+          <div><label>منطقة الحساب</label><select id="mtReg"><option value="new-york">New York</option><option value="london">London</option><option value="singapore">Singapore</option></select></div>
+          <div><label>لاحقة الرموز</label><input id="mtSuf" class="ltr" placeholder=".m" maxlength="8"></div>
+        </div>
+        <label style="margin-top:6px">اسم الذهب عند الوسيط</label><input id="mtGold" class="ltr" placeholder="XAUUSD" maxlength="32" style="width:100%">
+        <div class="row" style="margin-top:8px"><button class="pri" id="mtSave">حفظ واختبار</button><button id="mtDel">حذف</button></div>
+        <div id="mtMsg" style="font-size:12px;margin-top:6px"></div>
+        <div class="mu" style="font-size:11px;margin-top:6px">يُحفظ على هذا الجهاز فقط ويُرسل مع كل طلب إلى خادم المنصّة ليجلب شموعك من MetaApi، ولا يُخزَّن على الخادم. لا تُدخله على جهاز مشترك.</div>
+      </div>
+    </details>
+
     <div class="card">
       <h3>الانحياز <span class="mu" style="font-size:11px">على آخر شمعة مغلقة</span></h3>
       <div id="biasBox" class="bias neu">—</div>
@@ -451,9 +467,19 @@ alertcondition(swpLo and bias >= 0, "اكتساح قاع آسيا", "اكتسا�
 `;}
 
 /* ================= البيانات ================= */
+/* ================= إعدادات MetaApi (على هذا الجهاز فقط) ================= */
+const MTK='icool_mt';
+function mtGet(){try{const o=JSON.parse(localStorage.getItem(MTK)||'null');return o&&o.tok&&o.acc?o:null;}catch(_){return null;}}
+function mtHeaders(){const o=mtGet();if(!o)return {};const h={'x-metaapi-token':o.tok,'x-metaapi-account':o.acc,'x-metaapi-region':o.reg||'new-york'};
+  if(o.suf)h['x-metaapi-suffix']=o.suf;if(o.gold)h['x-metaapi-symbols']=JSON.stringify({XAUUSD:o.gold});return h;}
+async function fetchApi(sym,tf){const h=mtHeaders(),u=Object.keys(h).length?'&u=1':''; // u=1 يفصل الرابط عن ذاكرة CDN العامة
+  const r=await fetch('/api/candles?s='+sym+'&i='+tf+'&n=600'+u,{cache:'no-store',headers:h});return r.json();}
+function mtWhy(tried){const t=(tried||[]).find(x=>/^metaapi:/.test(x));if(!t)return '';const c=t.split(':')[1];
+  return c==='401'?'التوكن غير صالح أو منتهي':c==='404'?'الحساب غير موجود أو الرمز غير معرّف عند الوسيط (جرّب اللاحقة أو اسم الذهب)':
+    c==='timeout'?'انتهت المهلة — هل الحساب Deployed؟':c==='short'?'بيانات قليلة جداً':'خطأ '+c;}
 async function loadCandles(sym,tf){
-  try{const r=await fetch('/api/candles?s='+sym+'&i='+tf+'&n=600',{cache:'no-store'});
-    const j=await r.json();if(j.ok&&j.candles.length>=60)return {c:j.candles,src:j.source,keyed:j.keyed};
+  try{const j=await fetchApi(sym,tf);ST.tried=j.tried||(j.error&&j.error.tried)||[];
+    if(j.ok&&j.candles.length>=60)return {c:j.candles,src:j.source,keyed:j.keyed};
     throw new Error((j.error&&j.error.code)||'fail');}
   catch(e){
     if(/^(BTC|ETH)/.test(sym)){try{const bn={'5m':'5m','15m':'15m','1h':'1h','4h':'4h','1d':'1d'}[tf];
@@ -565,7 +591,7 @@ function panels(){
     <div class="bar"><i style="width:${s.score}%;background:${s.ok?'#4ADE80':'#8A9BB5'}"></i></div></div>`).join(''):'<div class="mu">لا إشارات في آخر 150 شمعة.</div>';
   document.querySelectorAll('.sig').forEach(el=>el.onclick=()=>{const s=sg[+el.dataset.j];ST.selSig=s;$('en').value=dp(s.en);$('sl').value=dp(s.sl);$('tp').value=dp(s.tp);
     const i=s.i;if(i<ST._geo.s0)ST.view.end=Math.min(ST.c.length,i+60);risk();panels();draw();});
-  $('status').textContent='المصدر: '+ST.src+(/yahoo/.test(ST.src)&&(TVS[ST.sym]||[])[1]?' (عقد آجل '+TVS[ST.sym][1]+')':'')+(ST.keyed===false&&!/binance/.test(ST.src)?' · بلا مفتاح':'')+' · '+c.length+' شمعة · ATR '+dp(R.at);
+  $('status').textContent=(mtGet()&&ST.src!=='metaapi'?'⚠ MetaApi: '+(mtWhy(ST.tried)||'غير متاح')+' · ':'')+'المصدر: '+ST.src+(/yahoo/.test(ST.src)&&(TVS[ST.sym]||[])[1]?' (عقد آجل '+TVS[ST.sym][1]+')':'')+(ST.keyed===false&&!/binance/.test(ST.src)?' · بلا مفتاح':'')+' · '+c.length+' شمعة · ATR '+dp(R.at);
 }
 function gotobi(){if(ST.sym!=='USDJPY')return '';const p=tzp(Date.now()/1000,'Asia/Tokyo');return [5,10,15,20,25,30].includes(p.d)?'<br>اليوم يوم <b>Gotobi</b> — ضغط شراء محتمل على الدولار/ين حتى تثبيت 9:55 طوكيو.':'';}
 function risk(){const eq=+$('eq').value,rk=Math.min(1,+$('rk').value)/100,en=+$('en').value,sl=+$('sl').value,tp=+$('tp').value,vpu=+$('vpu').value;
@@ -600,6 +626,9 @@ function setView(tv){ST.tv=tv;$('vTV').classList.toggle('on',tv);$('vIcool').cla
   $('tvBox').style.display=tv?'block':'none';['tip','status'].forEach(id=>$(id).style.display=tv?'none':'');
   try{localStorage.setItem('icool_tv',tv?'1':'0');}catch(_){}if(tv)tvShow();else resize();}
 
+function mtUI(){const o=mtGet();$('mtState').innerHTML=o?'<span class="ok">مربوط</span>':'غير مربوط';
+  if(o){$('mtAcc').value=o.acc;$('mtReg').value=o.reg||'new-york';$('mtSuf').value=o.suf||'';$('mtGold').value=o.gold||'';$('mtTok').placeholder='•••• محفوظ — اتركه أو أدخل جديداً';$('mtTok').value=o.tok;}}
+
 /* ================= الدورة ================= */
 async function load(){
   ST.sym=$('sym').value;ST.tf=$('tf').value;ST.anchor=$('anchor').value;$('status').textContent='جارٍ التحميل…';
@@ -616,6 +645,18 @@ function init(){
   ['shSess','shZones','shIchi'].forEach(id=>$(id).onchange=draw);
   ['eq','rk','en','sl','tp','vpu'].forEach(id=>$(id).oninput=risk);
   $('btnLoad').onclick=load;
+  mtUI();
+  $('mtSave').onclick=async()=>{const o={tok:$('mtTok').value.trim(),acc:$('mtAcc').value.trim(),reg:$('mtReg').value,suf:$('mtSuf').value.trim(),gold:$('mtGold').value.trim()};
+    if(!o.tok||!o.acc){$('mtMsg').innerHTML='<span class="dn">أدخل التوكن ورقم الحساب.</span>';return;}
+    try{localStorage.setItem(MTK,JSON.stringify(o));}catch(_){$('mtMsg').innerHTML='<span class="dn">المتصفح يمنع الحفظ.</span>';return;}
+    $('mtMsg').textContent='جارٍ الاختبار على XAUUSD…';
+    try{const j=await fetchApi('XAUUSD','15m');
+      if(j.ok&&j.source==='metaapi'){const L=j.candles[j.candles.length-1];$('mtMsg').innerHTML='<span class="ok">✓ متّصل — آخر سعر ذهب من حسابك '+N(L.c)+'</span>';}
+      else if(j.error&&j.error.code==='BAD_KEY')$('mtMsg').innerHTML='<span class="dn">'+j.error.message+'</span>';
+      else $('mtMsg').innerHTML='<span class="dn">✗ لم تأتِ البيانات من MetaApi: '+(mtWhy(j.tried||(j.error&&j.error.tried))||'سبب غير معروف')+'</span>';}
+    catch(_){$('mtMsg').innerHTML='<span class="dn">تعذّر الاتصال بخادم المنصّة.</span>';}
+    mtUI();load();};
+  $('mtDel').onclick=()=>{try{localStorage.removeItem(MTK);}catch(_){}['mtTok','mtAcc','mtSuf','mtGold'].forEach(id=>$(id).value='');$('mtMsg').textContent='حُذف الربط من هذا الجهاز.';mtUI();load();};
   $('vIcool').onclick=()=>setView(false);$('vTV').onclick=()=>setView(true);
   try{if(localStorage.getItem('icool_tv')==='1')setView(true);}catch(_){}
   $('pine').value=pineCode();

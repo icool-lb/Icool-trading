@@ -38,11 +38,14 @@ const MT_TF = Object.freeze({ '1m': '1m', '5m': '5m', '15m': '15m', '1h': '1h', 
 const REGION_RE = /^[a-z-]{2,20}$/;
 
 // اسم الرمز عند الوسيط: METAAPI_SYMBOLS='{"NAS100":"USTEC"}' يتجاوز الافتراضي، ثم تُضاف METAAPI_SUFFIX (مثل ".m")
-function mtSymbol(key) {
+// opt (من لوحة الإعدادات في المتصفح) يتقدّم على متغيّرات البيئة
+function mtSymbol(key, opt) {
+  opt = opt || {};
   let map = {};
-  try { map = JSON.parse(process.env.METAAPI_SYMBOLS || '{}') || {}; } catch (_) { map = {}; }
+  try { map = JSON.parse(opt.symbols != null ? opt.symbols : (process.env.METAAPI_SYMBOLS || '{}')) || {}; } catch (_) { map = {}; }
   const base = typeof map[key] === 'string' && /^[A-Za-z0-9._#-]{1,32}$/.test(map[key]) ? map[key] : key;
-  const suf = /^[A-Za-z0-9._#-]{0,8}$/.test(process.env.METAAPI_SUFFIX || '') ? (process.env.METAAPI_SUFFIX || '') : '';
+  const sufRaw = opt.suffix != null ? opt.suffix : (process.env.METAAPI_SUFFIX || '');
+  const suf = /^[A-Za-z0-9._#-]{0,8}$/.test(sufRaw) ? sufRaw : '';
   return base + suf;
 }
 
@@ -62,10 +65,12 @@ async function fromOanda(sKey, iKey, n, token) {
     c: num(k.mid.c), v: num(k.volume) || 0 })));
 }
 
-async function fromMetaApi(sKey, iKey, n, token, account) {
-  const region = REGION_RE.test(process.env.METAAPI_REGION || '') ? process.env.METAAPI_REGION : 'new-york';
+async function fromMetaApi(sKey, iKey, n, token, account, opt) {
+  opt = opt || {};
+  const r0 = opt.region || process.env.METAAPI_REGION || '';
+  const region = REGION_RE.test(r0) ? r0 : 'new-york';
   const u = `https://mt-market-data-client-api-v1.${region}.agiliumtrade.ai/users/current/accounts/${encodeURIComponent(account)}` +
-            `/historical-market-data/symbols/${encodeURIComponent(mtSymbol(sKey))}/timeframes/${MT_TF[iKey]}/candles?limit=${n}`;
+            `/historical-market-data/symbols/${encodeURIComponent(mtSymbol(sKey, opt))}/timeframes/${MT_TF[iKey]}/candles?limit=${n}`;
   const j = await getJSON(u, { 'auth-token': token, Accept: 'application/json' });
   if (!Array.isArray(j)) throw new Error('MetaApi shape');
   return clean(j.map(k => ({ t: Math.floor(Date.parse(k.time) / 1000), o: num(k.open), h: num(k.high), l: num(k.low), c: num(k.close),
@@ -148,13 +153,21 @@ async function handler(req, res) {
   if (!iv) return send(res, 400, { ok: false, error: { code: 'BAD_INTERVAL', message: 'فاصل غير مدعوم' } });
   const n = Math.max(50, Math.min(1000, parseInt(q.n, 10) || 500));
   const key = process.env.TWELVEDATA_API_KEY;
-  const mtTok = process.env.METAAPI_TOKEN, mtAcc = process.env.METAAPI_ACCOUNT_ID;
-  const oaTok = process.env.OANDA_API_KEY;
+  // مفاتيح المستخدم من لوحة الإعدادات (رؤوس x-metaapi-*) تتقدّم على مفاتيح Vercel، وتُتحقَّق صيغها قبل أي طلب
+  const H = req.headers || {}, hv = k => (typeof H[k] === 'string' ? H[k].trim() : '');
+  const uTok = hv('x-metaapi-token'), uAcc = hv('x-metaapi-account');
+  const userMt = /^[A-Za-z0-9._-]{20,4096}$/.test(uTok) && /^[A-Za-z0-9-]{8,64}$/.test(uAcc);
+  if ((uTok || uAcc) && !userMt) return send(res, 400, { ok: false, error: { code: 'BAD_KEY', message: 'صيغة توكن MetaApi أو رقم الحساب غير صحيحة' } });
+  const mtOpt = userMt ? { region: hv('x-metaapi-region'), suffix: hv('x-metaapi-suffix'), symbols: hv('x-metaapi-symbols') || '{}' } : {};
+  const mtTok = userMt ? uTok : process.env.METAAPI_TOKEN, mtAcc = userMt ? uAcc : process.env.METAAPI_ACCOUNT_ID;
+  const oaTok = userMt ? null : process.env.OANDA_API_KEY;   // من أدخل حسابه يريد بياناته هو
   const keyed = !!(key || oaTok || (mtTok && mtAcc));
+  // استجابة مبنية على مفتاح مستخدم لا تُخزَّن في CDN أبداً — ذاكرته تُفهرس بالرابط لا بالرؤوس
+  const cacheOk = userMt ? 'private, no-store' : iv.cache;
 
   const chain = [];
   if (oaTok && OANDA_INS[sKey]) chain.push(['oanda', () => fromOanda(sKey, iKey, n, oaTok)]);
-  if (mtTok && mtAcc) chain.push(['metaapi', () => fromMetaApi(sKey, iKey, n, mtTok, mtAcc)]);
+  if (mtTok && mtAcc) chain.push(['metaapi', () => fromMetaApi(sKey, iKey, n, mtTok, mtAcc, mtOpt)]);
   if (sym.bn) chain.push(['binance', () => fromBinance(sym, iv, n)]);
   if (key) chain.push(['twelvedata', () => fromTwelve(sym, iv, n, key)]);
   chain.push(['yahoo', () => fromYahoo(sym, iv, n)]);
@@ -164,7 +177,7 @@ async function handler(req, res) {
     try {
       const candles = await fn();
       if (candles.length >= 30) {
-        return send(res, 200, { ok: true, symbol: sKey, interval: iKey, source: name, keyed, candles }, iv.cache);
+        return send(res, 200, { ok: true, symbol: sKey, interval: iKey, source: name, keyed, user: userMt, tried, candles }, cacheOk);
       }
       tried.push(name + ':short');
     } catch (e) {
@@ -172,7 +185,7 @@ async function handler(req, res) {
     }
   }
   return send(res, 502, { ok: false, keyed, error: { code: 'UPSTREAM_FAIL', message: 'تعذّر جلب البيانات', tried } },
-    'public, max-age=0, s-maxage=15');
+    userMt ? 'private, no-store' : 'public, max-age=0, s-maxage=15');
 }
 
 module.exports = handler;
